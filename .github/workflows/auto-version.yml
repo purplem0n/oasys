@@ -1,0 +1,147 @@
+# Bump package.json version on push to main based on commit message.
+# Use [major], [minor], or [patch] in the commit message; default is patch.
+# Use [skip autover] to skip version bump.
+
+name: Auto Version
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  PACKAGE_JSON_PATH: oasys-tui/package.json
+
+jobs:
+  auto-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for skip autover
+        run: |
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          if [[ "$COMMIT_MSG" == *"[skip autover]"* ]]; then
+            echo "Skipping autover due to [skip autover] in commit message"
+            exit 0
+          fi
+          echo "Proceeding with autover..."
+
+      - name: Get current version
+        id: current_version
+        run: |
+          CURRENT_VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' ${{ env.PACKAGE_JSON_PATH }} | sed 's/.*"\([^"]*\)".*/\1/')
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $CURRENT_VERSION"
+
+      - name: Parse version components
+        id: version_components
+        run: |
+          VERSION_PART="${{ steps.current_version.outputs.current_version }}"
+          MAJOR=$(echo $VERSION_PART | cut -d'.' -f1)
+          MINOR=$(echo $VERSION_PART | cut -d'.' -f2)
+          PATCH=$(echo $VERSION_PART | cut -d'.' -f3)
+
+          echo "major=$MAJOR" >> $GITHUB_OUTPUT
+          echo "minor=$MINOR" >> $GITHUB_OUTPUT
+          echo "patch=$PATCH" >> $GITHUB_OUTPUT
+
+          echo "Current version components: Major=$MAJOR Minor=$MINOR Patch=$PATCH"
+
+      - name: Determine version bump type
+        id: bump_type
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          echo "Commit message: $COMMIT_MSG"
+
+          if [[ "$COMMIT_MSG" == *"[major]"* ]]; then
+            echo "bump_type=major" >> $GITHUB_OUTPUT
+            echo "Version bump: MAJOR"
+          elif [[ "$COMMIT_MSG" == *"[minor]"* ]]; then
+            echo "bump_type=minor" >> $GITHUB_OUTPUT
+            echo "Version bump: MINOR"
+          elif [[ "$COMMIT_MSG" == *"[patch]"* ]]; then
+            echo "bump_type=patch" >> $GITHUB_OUTPUT
+            echo "Version bump: PATCH"
+          else
+            echo "bump_type=patch" >> $GITHUB_OUTPUT
+            echo "Version bump: PATCH (default for commits without version tags)"
+          fi
+
+      - name: Calculate new version
+        id: new_version
+        run: |
+          MAJOR="${{ steps.version_components.outputs.major }}"
+          MINOR="${{ steps.version_components.outputs.minor }}"
+          PATCH="${{ steps.version_components.outputs.patch }}"
+          BUMP_TYPE="${{ steps.bump_type.outputs.bump_type }}"
+
+          case $BUMP_TYPE in
+            "major")
+              NEW_MAJOR=$((MAJOR + 1))
+              NEW_MINOR=0
+              NEW_PATCH=0
+              ;;
+            "minor")
+              NEW_MAJOR=$MAJOR
+              NEW_MINOR=$((MINOR + 1))
+              NEW_PATCH=0
+              ;;
+            "patch")
+              NEW_MAJOR=$MAJOR
+              NEW_MINOR=$MINOR
+              NEW_PATCH=$((PATCH + 1))
+              ;;
+            *)
+              NEW_MAJOR=$MAJOR
+              NEW_MINOR=$MINOR
+              NEW_PATCH=$PATCH
+              ;;
+          esac
+
+          NEW_VERSION="${NEW_MAJOR}.${NEW_MINOR}.${NEW_PATCH}"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "New version: $NEW_VERSION"
+
+      - name: Update package.json
+        run: |
+          NEW_VERSION="${{ steps.new_version.outputs.new_version }}"
+          sed -i "s/\"version\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"version\": \"$NEW_VERSION\"/" ${{ env.PACKAGE_JSON_PATH }}
+          echo "Updated ${{ env.PACKAGE_JSON_PATH }} with version: $NEW_VERSION"
+
+      - name: Verify changes
+        run: |
+          echo "Updated package.json:"
+          grep '"version"' ${{ env.PACKAGE_JSON_PATH }}
+
+      - name: Configure Git
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+      - name: Commit and push changes
+        run: |
+          NEW_VERSION="${{ steps.new_version.outputs.new_version }}"
+          OLD_VERSION="${{ steps.current_version.outputs.current_version }}"
+
+          git add ${{ env.PACKAGE_JSON_PATH }}
+          git commit -m "chore: bump version from $OLD_VERSION to $NEW_VERSION [skip autover]"
+          git push origin main
+
+          echo "Successfully updated version from $OLD_VERSION to $NEW_VERSION"
+
+      - name: Create and push tag
+        run: |
+          NEW_VERSION="${{ steps.new_version.outputs.new_version }}"
+          TAG="v${NEW_VERSION}"
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "Created and pushed tag: $TAG"
