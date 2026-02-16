@@ -23,6 +23,25 @@ echo "Building oasys $VERSION"
 
 mkdir -p "$DIST_DIR"
 
+# Create .zip from binary (works on Linux, macOS, and Windows where zip may be missing)
+zip_binary() {
+  local out_binary="$1"
+  local artifact_name="$2"
+  local zip_path="$DIST_DIR/$artifact_name.zip"
+  local bin_path="$DIST_DIR/$out_binary"
+
+  if command -v zip &>/dev/null; then
+    zip -j "$zip_path" "$bin_path"
+  elif [[ "$(uname -s)" =~ ^MINGW ]] || [[ "$(uname -s)" =~ ^MSYS ]] || [[ -n "${OS:-}" && "$OS" == "Windows_NT" ]]; then
+    # Windows (Git Bash): use PowerShell
+    powershell.exe -NoProfile -Command "Compress-Archive -Path 'dist/$out_binary' -DestinationPath 'dist/$artifact_name.zip' -Force"
+  else
+    echo "error: zip not found and not on Windows" >&2
+    exit 127
+  fi
+  rm -f "$bin_path"
+}
+
 # Map: our target name -> (bun target, output binary name)
 build_one() {
   local bun_target="$1"
@@ -37,8 +56,7 @@ build_one() {
     --define "OASYS_VERSION=\"$VERSION\""
 
   if [[ -f "$DIST_DIR/$out_binary" ]]; then
-    zip -j "$DIST_DIR/$artifact_name.zip" "$DIST_DIR/$out_binary"
-    rm -f "$DIST_DIR/$out_binary"
+    zip_binary "$out_binary" "$artifact_name"
   fi
 }
 
