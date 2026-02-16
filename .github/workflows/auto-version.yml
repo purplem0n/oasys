@@ -30,16 +30,20 @@ jobs:
           token: ${{ secrets.REPO_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Check for skip autover
+        id: check_skip
         run: |
           COMMIT_MSG="${{ github.event.head_commit.message }}"
           if [[ "$COMMIT_MSG" == *"[skip autover]"* ]]; then
+            echo "skip_autover=true" >> $GITHUB_OUTPUT
             echo "Skipping autover due to [skip autover] in commit message"
-            exit 0
+          else
+            echo "skip_autover=false" >> $GITHUB_OUTPUT
+            echo "Proceeding with autover..."
           fi
-          echo "Proceeding with autover..."
 
       - name: Get current version
         id: current_version
+        if: steps.check_skip.outputs.skip_autover != 'true'
         run: |
           CURRENT_VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' ${{ env.PACKAGE_JSON_PATH }} | sed 's/.*"\([^"]*\)".*/\1/')
           echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
@@ -47,6 +51,7 @@ jobs:
 
       - name: Parse version components
         id: version_components
+        if: steps.check_skip.outputs.skip_autover != 'true'
         run: |
           VERSION_PART="${{ steps.current_version.outputs.current_version }}"
           MAJOR=$(echo $VERSION_PART | cut -d'.' -f1)
@@ -61,6 +66,7 @@ jobs:
 
       - name: Determine version bump type
         id: bump_type
+        if: steps.check_skip.outputs.skip_autover != 'true'
         env:
           COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
@@ -82,6 +88,7 @@ jobs:
 
       - name: Calculate new version
         id: new_version
+        if: steps.check_skip.outputs.skip_autover != 'true'
         run: |
           MAJOR="${{ steps.version_components.outputs.major }}"
           MINOR="${{ steps.version_components.outputs.minor }}"
@@ -116,22 +123,26 @@ jobs:
           echo "New version: $NEW_VERSION"
 
       - name: Update package.json
+        if: steps.check_skip.outputs.skip_autover != 'true'
         run: |
           NEW_VERSION="${{ steps.new_version.outputs.new_version }}"
           sed -i "s/\"version\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"version\": \"$NEW_VERSION\"/" ${{ env.PACKAGE_JSON_PATH }}
           echo "Updated ${{ env.PACKAGE_JSON_PATH }} with version: $NEW_VERSION"
 
       - name: Verify changes
+        if: steps.check_skip.outputs.skip_autover != 'true'
         run: |
           echo "Updated package.json:"
           grep '"version"' ${{ env.PACKAGE_JSON_PATH }}
 
       - name: Configure Git
+        if: steps.check_skip.outputs.skip_autover != 'true'
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
 
       - name: Commit and push changes
+        if: steps.check_skip.outputs.skip_autover != 'true'
         run: |
           NEW_VERSION="${{ steps.new_version.outputs.new_version }}"
           OLD_VERSION="${{ steps.current_version.outputs.current_version }}"
@@ -143,6 +154,7 @@ jobs:
           echo "Successfully updated version from $OLD_VERSION to $NEW_VERSION"
 
       - name: Create and push tag
+        if: steps.check_skip.outputs.skip_autover != 'true'
         run: |
           NEW_VERSION="${{ steps.new_version.outputs.new_version }}"
           TAG="v${NEW_VERSION}"
