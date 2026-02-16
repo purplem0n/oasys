@@ -1,8 +1,7 @@
 import { mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-import { sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/libsql/sqlite3";
+import { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/bun-sqlite";
 import { INIT_SQL } from "../db/init.sql";
 
 const dataDir = join(process.cwd(), "data");
@@ -10,7 +9,8 @@ if (!existsSync(dataDir)) {
 	mkdirSync(dataDir, { recursive: true });
 }
 const dbPath = join(dataDir, "oasys.sqlite");
-const db = drizzle({ connection: { url: pathToFileURL(dbPath).href } });
+const sqlite = new Database(dbPath);
+const db = drizzle({ client: sqlite });
 
 let initDone = false;
 
@@ -19,7 +19,7 @@ async function ensureSchema() {
 	initDone = true;
 	const statements = INIT_SQL.split(";").map((s) => s.trim()).filter(Boolean);
 	for (const stmt of statements) {
-		if (stmt) await db.run(sql.raw(stmt));
+		if (stmt) sqlite.run(stmt);
 	}
 }
 
