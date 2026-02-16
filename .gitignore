@@ -1,0 +1,4 @@
+.agents/
+.cursor/
+oasys-api/data/oasys.sqlite
+oasys-tui/data/oasys.sqlite
