@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Install oasys CLI from GitHub Releases.
-# Usage: curl -fsSL https://raw.githubusercontent.com/YOUR_ORG/oasys/main/oasys-tui/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/purplem0n/oasys/main/oasys-tui/install.sh | bash
 #    or: curl -fsSL https://your-domain.com/install | bash
 #
-# Override: OASYS_INSTALL_DIR (default: ~/.local/bin), GITHUB_REPO (default: YOUR_ORG/oasys)
+# Override: OASYS_INSTALL_DIR (default: ~/.local/bin), GITHUB_REPO (default: purplem0n/oasys)
 
 set -euo pipefail
 
-# Default GitHub repo – set when you publish (e.g. myorg/oasys)
-GITHUB_REPO="${GITHUB_REPO:-YOUR_ORG/oasys}"
+# Default GitHub repo
+GITHUB_REPO="${GITHUB_REPO:-purplem0n/oasys}"
 GITHUB="${GITHUB:-https://github.com}"
 BASE_URL="$GITHUB/$GITHUB_REPO/releases"
 
