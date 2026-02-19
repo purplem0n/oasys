@@ -103,6 +103,8 @@ export async function streamChat(params: {
   urlContext?: boolean;
   /** Internal retry after expectedToolCallMissing; retry prompt not saved to history */
   internalRetry?: boolean;
+  /** With internalRetry: rephrase last user message to elicit a tool call (prompt omitted) */
+  rephrase?: boolean;
   googleGenerativeAiApiKey?: string;
 }): Promise<ReadableStream<StreamEvent>> {
   const body = new URLSearchParams();
@@ -119,6 +121,7 @@ export async function streamChat(params: {
   if (params.thinking !== undefined) body.set("thinking", String(params.thinking));
   if (params.urlContext !== undefined) body.set("urlContext", String(params.urlContext));
   if (params.internalRetry !== undefined) body.set("internalRetry", String(params.internalRetry));
+  if (params.rephrase !== undefined) body.set("rephrase", String(params.rephrase));
   if (params.googleGenerativeAiApiKey) body.set("googleGenerativeAiApiKey", params.googleGenerativeAiApiKey);
 
   const res = await fetch(`${API_BASE}/chat/stream-text`, {

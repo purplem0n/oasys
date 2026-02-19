@@ -81,6 +81,9 @@ export const ChatStreamTextSchema = z.object({
 	internalRetry: booleanFromString
 		.optional()
 		.describe("Internal: retry after expectedToolCallMissing. Retry prompt is not saved to chat history."),
+	rephrase: booleanFromString
+		.optional()
+		.describe("When used with internalRetry: rephrase the last user message to elicit a tool call; prompt may be omitted."),
 	googleGenerativeAiApiKey: z
 		.string()
 		.optional()

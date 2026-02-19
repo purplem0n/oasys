@@ -1,10 +1,29 @@
-import { createWriteStream, existsSync, mkdirSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, truncateSync } from "node:fs";
 import { join } from "node:path";
 
 const LOG_DIR = process.env.OASYS_LOG_DIR ?? join(process.cwd(), "logs");
 const LOG_FILE = join(LOG_DIR, "api.log");
 
 let stream: ReturnType<typeof createWriteStream> | null = null;
+let currentLogConversationId: string | null = null;
+
+/**
+ * Start logging for this conversation. If the id is different from the current
+ * one, the log file is cleared so only the latest conversation is preserved.
+ */
+function startConversation(conversationId: string): void {
+	if (conversationId === currentLogConversationId) return;
+	currentLogConversationId = conversationId;
+	if (stream) {
+		stream.end();
+		stream = null;
+	}
+	try {
+		if (existsSync(LOG_FILE)) truncateSync(LOG_FILE, 0);
+	} catch {
+		// ignore truncate errors
+	}
+}
 
 function ensureStream(): ReturnType<typeof createWriteStream> {
 	if (stream) return stream;
@@ -29,6 +48,7 @@ function formatPayload(msg: unknown): string {
 }
 
 export const apiLog = {
+	startConversation,
 	info(...args: unknown[]): void {
 		const line = `${timestamp()} [INFO] ${args.map(formatPayload).join(" ")}\n`;
 		try {

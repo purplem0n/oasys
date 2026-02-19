@@ -79,19 +79,20 @@ const TERMINAL_AGENT_SYSTEM = `You are a Terminal Agent that helps users configu
 
 Tool usage (critical):
 - run_command: Use this for ANY action that must run on the user's machine. You MUST invoke the tool (make a tool call)—do not write "run_command:..." or the tool name in your message text. The command only runs when you actually call the tool. Examples: checking if something is installed (which X, X --version), listing files, reading configs. Do NOT use web search to simulate command output—only run_command gives you actual output from this machine.
-- Web search (if available): Use only for general knowledge, documentation, or pasted errors. Never use web search when the correct action is to execute a command on the user's machine (e.g. "is Python installed?" → invoke run_command with "which python", not a search).
+- Web search (if available): Use only for general knowledge, documentation, or pasted errors. Never use web search when the correct action is to execute a command on the user's machine (e.g. "is Python installed?" → invoke run_command with "which python", not a search). To use web search you must invoke the web search tool—do not write "google_search", "web search", or any search syntax inside <command> or in your message; that does nothing.
 
 Rules:
 - Run one command at a time. After receiving a tool result, respond in plain language then use the tool again if needed.
 - Before the first tool call in a turn, give a one-sentence explanation (e.g. "I'll list the files in your home directory."), then immediately invoke the run_command tool—do not output the command as text.
-- Never write "run_command", "run_command:...", or API names in your reply. To run a command you must make a tool call; typing the command in your message does nothing.
-- Never output raw JSON or internal structures. Reply only in clear, human-readable text.
+- Never write "run_command", "run_command(", "Calling:", "Invoking:", or code blocks like \`\`\`run_command\\n...\\n\`\`\` in your message. The only way to run a command is to use the actual tool call; writing it in your text does nothing and confuses the user.
+- Never output raw JSON, function names, or internal structures. Reply only in clear, human-readable text (and use the tool call separately).
 - When you receive command output, interpret it and answer the user; if you need another command, say so in words then use the tool once.
 - If the user asks something that needs no shell command (e.g. a general-knowledge question), still invoke run_command with a harmless command that conveys your answer (e.g. echo 'Your answer here') so the tool is used; then summarize in your reply.
-- If a command fails, explain in plain language and suggest fixes. Be concise and safe: avoid destructive commands without user context.`;
+- If a command fails, explain in plain language and suggest fixes. Be concise and safe: avoid destructive commands without user context.
+- If you ever need to indicate a command in your message (always prefer using the tool), wrap it in <command>...</command> so it can be executed, e.g. <command>df -h</command> or <command>ls -aux | grep steam</command>. Use this format only as fallback; the proper way is to invoke the run_command tool. <command> must contain only a shell command (bash, ls, curl, etc.). Never put web search, google_search, or any non-shell API call inside <command>—it will be run as a shell command and fail.`;
 
 const runCommandTool = tool({
-	description: "Execute a shell command on the user's machine and get real stdout/stderr. You MUST invoke this tool (make a tool call)—writing the command or 'run_command' in your text response does nothing. Use for: listing files (ls), checking installs (which X, X --version), reading configs, any shell command. This is the only way to get actual output from the user's system.",
+	description: "Execute a shell command on the user's machine and get real stdout/stderr. You MUST invoke this tool (make a tool call). Do NOT write the command or 'run_command' or 'Calling: run_command(...)' in your text—that does nothing. Use for: listing files (ls), checking installs (which X, X --version), reading configs, any shell command. This is the only way to get actual output from the user's system.",
 	inputSchema: z.object({
 		command: z.string().describe("The full shell command to run (e.g. 'ls -la ~', 'which python')."),
 	}),
@@ -100,6 +101,33 @@ const runCommandTool = tool({
 
 /** Classifier layer: does the user message require running a command on the client? Not persisted to chat history. */
 const CLASSIFY_SYSTEM = `You are a classifier. Does the user's message require running a shell command on their machine (e.g. list files, check installs, run a script, show config, see disk space)? Answer only TRUE or FALSE.`;
+
+/** Rephrase the user message so it clearly asks to run a command; used when the model replied with text instead of a tool call. Not saved to chat history. */
+const REPHRASE_SYSTEM = `Rephrase the user's request into a single short sentence that clearly asks to execute a command on their machine. Keep the same intent. Output only the rephrased request, no explanation, no preamble, no "run_command" or tool names. Example: "list files in the current directory" -> "List the files in my current directory."`;
+
+async function rephraseForToolUse(
+	model: string,
+	userPrompt: string,
+	modelClient: ReturnType<typeof createGoogleGenerativeAI> | ReturnType<typeof createGateway>,
+	useGateway: boolean,
+): Promise<string> {
+	const modelId = useGateway ? `google/${model}` : model;
+	try {
+		const { text } = await generateText({
+			model: useGateway
+				? (modelClient as ReturnType<typeof createGateway>)(modelId)
+				: (modelClient as ReturnType<typeof createGoogleGenerativeAI>)(model),
+			system: REPHRASE_SYSTEM,
+			messages: [{ role: "user", content: userPrompt }],
+			maxOutputTokens: 120,
+		});
+		const rephrased = text.trim();
+		return rephrased || userPrompt;
+	} catch (e) {
+		apiLog.error("Rephrase failed, using original message:", e);
+		return userPrompt;
+	}
+}
 
 async function classifyExpectsCommandRun(
 	model: string,
@@ -193,6 +221,34 @@ const configureThinking = (
 
 type StoredToolCall = { toolCallId: string; toolName: string; input?: unknown; args?: unknown };
 
+/** When the model wrote the command in text instead of using the tool, try to extract it so we can run it anyway. */
+function extractCommandFromAssistantText(text: string): string | null {
+	if (!text || typeof text !== "string") return null;
+	const t = text.trim();
+	// Preferred: <command>...</command> (deterministic format from system prompt)
+	const commandTag = /<command>([\s\S]*?)<\/command>/.exec(t);
+	if (commandTag?.[1]) {
+		const cmd = commandTag[1].trim();
+		if (cmd.length > 0 && cmd.length < 2048) return cmd;
+	}
+	// run_command("df -h") or run_command('df -h')
+	const quoted = /run_command\s*\(\s*["']([^"']+)["']\s*\)/.exec(t);
+	if (quoted?.[1]) return quoted[1].trim();
+	// ```run_command\ndf -h\n``` or ``` run_command df -h ```
+	const codeBlock = /```\s*run_command\s*\n([\s\S]*?)```/.exec(t);
+	if (codeBlock?.[1]) return codeBlock[1].trim();
+	// Calling: run_command("df -h")
+	const calling = /Calling:\s*run_command\s*\(\s*["']([^"']+)["']\s*\)/.exec(t);
+	if (calling?.[1]) return calling[1].trim();
+	// Single line that looks like a shell command: e.g. `df -h` on its own line
+	const backtickLine = /^`([^`]+)`\s*$/m.exec(t);
+	if (backtickLine?.[1]) {
+		const cmd = backtickLine[1].trim();
+		if (cmd.length > 0 && cmd.length < 256) return cmd;
+	}
+	return null;
+}
+
 /** Format run_command result for the model as plain text to avoid JSON/structure echoing. */
 function formatRunCommandResultForModel(result: unknown): string {
 	if (result && typeof result === "object" && "stdout" in result) {
@@ -249,14 +305,18 @@ export async function handleGeminiStream(c: AppContext, body: z.infer<typeof AIS
 		thinkingValue,
 		urlContext = false,
 		internalRetry = false,
+		rephrase = false,
 		googleGenerativeAiApiKey: userGoogleApiKey,
 		aiGatewayApiKey: userGatewayApiKey,
 	} = body;
 
 	const isContinuation = Array.isArray(toolResults) && toolResults.length > 0;
 	if (internalRetry) {
-		if (!providedConversationId || typeof prompt !== "string" || !prompt.trim()) {
-			return createSseErrorResponse("internalRetry requires conversationId and prompt (retry instruction).", 400);
+		if (!providedConversationId) {
+			return createSseErrorResponse("internalRetry requires conversationId.", 400);
+		}
+		if (!rephrase && (typeof prompt !== "string" || !prompt.trim())) {
+			return createSseErrorResponse("internalRetry without rephrase requires prompt (retry instruction).", 400);
 		}
 	} else if (isContinuation) {
 		if (!providedConversationId) {
@@ -332,8 +392,19 @@ export async function handleGeminiStream(c: AppContext, body: z.infer<typeof AIS
 		lastAssistantMessageId = lastMsg.id;
 		conversationMessages = messages.map(messageToModelMessage);
 		conversationId = existingConversation.id;
-		// Retry prompt is not persisted; only used for this request.
-		messagesPayload = [...conversationMessages, { role: "user" as const, content: prompt!.trim() }];
+		let retryPrompt: string;
+		if (rephrase) {
+			const lastUserMsg = messages.filter((m) => m.role === "user").pop();
+			if (!lastUserMsg?.content) {
+				return createSseErrorResponse("internalRetry with rephrase requires a user message in the conversation.", 400);
+			}
+			retryPrompt = await rephraseForToolUse(model, String(lastUserMsg.content).trim(), modelClient, useGateway);
+			apiLog.info("Auto-rephrase: using rephrased prompt", retryPrompt.slice(0, 80));
+		} else {
+			retryPrompt = prompt!.trim();
+		}
+		// Retry/rephrase prompt is not persisted; only used for this request.
+		messagesPayload = [...conversationMessages, { role: "user" as const, content: retryPrompt }];
 		apiLog.info("Internal retry: updating last assistant message", lastAssistantMessageId);
 	} else if (providedConversationId) {
 		const existingConversation =
@@ -374,6 +445,7 @@ export async function handleGeminiStream(c: AppContext, body: z.infer<typeof AIS
 		);
 	}
 	const cid = conversationId;
+	apiLog.startConversation(cid);
 
 	if (!internalRetry && isContinuation) {
 		const content = toolResults!.map((r) => {
@@ -558,10 +630,23 @@ export async function handleGeminiStream(c: AppContext, body: z.infer<typeof AIS
 				totalUsage,
 			]);
 
-			if (Array.isArray(toolCallsResult) && toolCallsResult.length > 0) {
+			// If model wrote the command in text (e.g. <command>...</command>) instead of using the tool, extract and emit a synthetic tool call.
+			// Do this whenever we have no tool calls and some assistant text (not only when classifier said expectToolCall), so e.g. "measure my internet speed" -> <command>which speedtest-cli</command> still runs.
+			let effectiveToolCalls = Array.isArray(toolCallsResult) ? toolCallsResult : [];
+			if (effectiveToolCalls.length === 0 && mode === "terminal_agent" && assistantResponse) {
+				const extracted = extractCommandFromAssistantText(assistantResponse);
+				if (extracted) {
+					effectiveToolCalls = [
+						{ type: "tool-call" as const, toolCallId: "fallback-0", toolName: "run_command", input: { command: extracted } },
+					];
+					apiLog.info("Terminal Agent: extracted command from assistant text (synthetic tool call):", extracted.slice(0, 60));
+				}
+			}
+
+			if (effectiveToolCalls.length > 0) {
 				const toolCallsEvent = {
 					event: "toolCalls",
-					data: JSON.stringify(toolCallsResult),
+					data: JSON.stringify(effectiveToolCalls),
 				};
 				await chat.writeln(JSON.stringify(toolCallsEvent));
 			} else if (expectToolCall) {
@@ -570,7 +655,7 @@ export async function handleGeminiStream(c: AppContext, body: z.infer<typeof AIS
 			}
 
 			let createdMessage: MessageSelect | null = null;
-			if (assistantResponse || (Array.isArray(toolCallsResult) && toolCallsResult.length > 0)) {
+			if (assistantResponse || effectiveToolCalls.length > 0) {
 				if (lastAssistantMessageId) {
 					// Internal retry: update the failed assistant message instead of creating new
 					createdMessage = await messageDb.update({
@@ -578,7 +663,7 @@ export async function handleGeminiStream(c: AppContext, body: z.infer<typeof AIS
 						data: {
 							content: assistantResponse || "",
 							reasoning: wrapJsonColumn(reasoningResult),
-							toolCalls: wrapJsonColumn(toolCallsResult),
+							toolCalls: wrapJsonColumn(effectiveToolCalls),
 							sources: wrapJsonColumn(sourcesResult),
 						},
 					});
@@ -590,7 +675,7 @@ export async function handleGeminiStream(c: AppContext, body: z.infer<typeof AIS
 							role: "assistant",
 							content: assistantResponse || "",
 							reasoning: wrapJsonColumn(reasoningResult),
-							toolCalls: wrapJsonColumn(toolCallsResult),
+							toolCalls: wrapJsonColumn(effectiveToolCalls),
 							sources: wrapJsonColumn(sourcesResult),
 						}),
 						conversationDb.update({
@@ -650,12 +735,12 @@ export async function handleGeminiStream(c: AppContext, body: z.infer<typeof AIS
 			}
 
 			const expectedToolCallMissing =
-				expectToolCall && !(Array.isArray(toolCallsResult) && toolCallsResult.length > 0);
+				expectToolCall && effectiveToolCalls.length === 0;
 			const chatFinish = {
 				event: 'chatFinish',
 				data: JSON.stringify({
 					success: true,
-					emptyResponse: !assistantResponse && !(Array.isArray(toolCallsResult) && toolCallsResult.length > 0),
+					emptyResponse: !assistantResponse && effectiveToolCalls.length === 0,
 					expectedToolCallMissing: expectedToolCallMissing || undefined,
 				}),
 			};
