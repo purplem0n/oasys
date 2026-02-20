@@ -23,7 +23,7 @@ export function Header({ thinkingEnabled, webSearchEnabled, tokenCounterText, mo
       backgroundColor={theme.bgElevated}
     >
       <text>
-        <span fg={theme.accent}>oasys v{getAppVersion()}</span>
+        <span fg={theme.accent}>oasys {getAppVersion()}</span>
         {thinkingEnabled && (
           <>
             <span fg={theme.muted}> · </span>
