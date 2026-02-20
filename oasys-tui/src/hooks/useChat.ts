@@ -13,7 +13,7 @@ import { getSystemInfo, getExtendedSystemInfo, formatSystemInfoShort, formatSyst
 import { runCommand } from "../utils/command";
 import { checkForUpdate, runInstallScript, runUpdateViaDetachedShell } from "../utils/update";
 import { DEFAULT_MODEL_KEY, getAppVersion, LOADING_SPINNER_FRAMES, LOADING_SPINNER_INTERVAL_MS } from "../constants";
-import type { AppMode, Message, CommandBlock } from "../types";
+import type { Message, CommandBlock } from "../types";
 
 export interface UseChatReturn {
   // State
@@ -28,10 +28,6 @@ export interface UseChatReturn {
   latestTotalTokens: number | null;
   error: string | null;
   setError: (v: string | null) => void;
-  mode: AppMode;
-  setMode: (v: AppMode | ((prev: AppMode) => AppMode)) => void;
-  showModeSelect: boolean;
-  setShowModeSelect: (v: boolean) => void;
   showCommandPalette: boolean;
   setShowCommandPalette: (v: boolean) => void;
   runningCommand: string | null;
@@ -91,8 +87,6 @@ export function useChat(): UseChatReturn {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [latestTotalTokens, setLatestTotalTokens] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<AppMode>("Terminal Agent");
-  const [showModeSelect, setShowModeSelect] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [runningCommand, setRunningCommand] = useState<string | null>(null);
   const [runningCommandCollapsed, setRunningCommandCollapsed] = useState(false);
@@ -173,8 +167,8 @@ export function useChat(): UseChatReturn {
       prompt: params.prompt,
       model,
       conversationId: params.currentConversationId ?? undefined,
-      mode: mode === "Terminal Agent" ? "terminal_agent" : "chat",
-      systemInfo: mode === "Terminal Agent" ? formatSystemInfoJSON(systemInfo) : undefined,
+      mode: "terminal_agent",
+      systemInfo: formatSystemInfoJSON(systemInfo),
       toolResults: params.toolResults,
       webSearch: webSearchEnabled,
       thinking: thinkingEnabled,
@@ -297,11 +291,6 @@ export function useChat(): UseChatReturn {
       setInputValue("");
       return;
     }
-    if (raw === "/mode" || raw.startsWith("/mode ")) {
-      setShowModeSelect(true);
-      setInputValue("");
-      return;
-    }
     if (raw === "/setup" || raw.startsWith("/setup ")) {
       setSetupApiKeyValue(apiKey);
       setShowSetupPrompt(true);
@@ -380,7 +369,7 @@ export function useChat(): UseChatReturn {
       currentCid = result.conversationIdFromStream ?? currentCid;
       const maxRephraseAttempts = 8;
       let rephraseAttemptsLeft = maxRephraseAttempts;
-      while (result.expectedToolCallMissing && currentCid && mode === "Terminal Agent" && rephraseAttemptsLeft > 0) {
+      while (result.expectedToolCallMissing && currentCid && rephraseAttemptsLeft > 0) {
         setMessages((prev) => {
           const next = [...prev];
           const last = next[next.length - 1];
@@ -401,7 +390,7 @@ export function useChat(): UseChatReturn {
           appendAssistantContent("\n\n(Still no command run after several attempts. Try rephrasing your request.)");
         }
       }
-      while (result.pendingToolCalls.length > 0 && mode === "Terminal Agent" && currentCid) {
+      while (result.pendingToolCalls.length > 0 && currentCid) {
         const cwd = typeof process !== "undefined" ? process.cwd() : ".";
         const toolResults: Array<{ toolCallId: string; toolName: string; result: unknown; isError?: boolean }> = [];
         for (const call of result.pendingToolCalls) {
@@ -503,7 +492,6 @@ export function useChat(): UseChatReturn {
       setError(null);
       setLatestTotalTokens(null);
     }
-    if (value === "mode") setShowModeSelect(true);
     if (value === "setup") {
       setSetupApiKeyValue(apiKey);
       setShowSetupPrompt(true);
@@ -550,10 +538,6 @@ export function useChat(): UseChatReturn {
     latestTotalTokens,
     error,
     setError,
-    mode,
-    setMode,
-    showModeSelect,
-    setShowModeSelect,
     showCommandPalette,
     setShowCommandPalette,
     runningCommand,

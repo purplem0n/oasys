@@ -16,7 +16,6 @@ export function App() {
         backgroundColor={theme.bg}
       >
         <Header
-          mode={chat.mode}
           thinkingEnabled={chat.thinkingEnabled}
           webSearchEnabled={chat.webSearchEnabled}
           tokenCounterText={chat.tokenCounterText}
@@ -38,7 +37,6 @@ export function App() {
       backgroundColor={theme.bg}
     >
       <Header
-        mode={chat.mode}
         thinkingEnabled={chat.thinkingEnabled}
         webSearchEnabled={chat.webSearchEnabled}
         tokenCounterText={chat.tokenCounterText}

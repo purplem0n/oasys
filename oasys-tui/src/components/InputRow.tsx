@@ -1,6 +1,5 @@
 import { theme } from "../theme";
 import { LOADING_SPINNER_FRAMES, SLASH_COMMANDS } from "../constants";
-import type { AppMode } from "../types";
 import type { AIModel } from "../api";
 import type { ConversationListItem } from "../api";
 import type { UseChatReturn } from "../hooks/useChat";
@@ -26,9 +25,6 @@ export function InputRow({ chat }: InputRowProps) {
     historyOpeningChat,
     historyList,
     openConversation,
-    showModeSelect,
-    setShowModeSelect,
-    setMode,
     runningCommand,
     streaming,
     inputValue,
@@ -37,7 +33,6 @@ export function InputRow({ chat }: InputRowProps) {
     showCommandPalette,
     sendMessage,
     apiKey,
-    mode,
     loadingFrame,
     runCommandFromPalette,
   } = chat;
@@ -188,44 +183,6 @@ export function InputRow({ chat }: InputRowProps) {
     );
   }
 
-  if (showModeSelect) {
-    return (
-      <box flexDirection="column" gap={0} flexShrink={0}>
-        <box
-          flexDirection="column"
-          gap={0}
-          flexShrink={0}
-          border
-          borderStyle="single"
-          borderColor={theme.border}
-          backgroundColor={theme.bgElevated}
-        >
-          <box paddingX={1} paddingY={1}>
-            <text>
-              <span fg={theme.muted}>Select mode (↑↓ Enter): </span>
-            </text>
-          </box>
-          <box paddingX={1}>
-            <select
-              options={[
-                { name: "Chat", description: "Normal conversation", value: "Chat" },
-                { name: "Terminal Agent", description: "Run commands in your terminal", value: "Terminal Agent" },
-              ]}
-              height={6}
-              onSelect={(_index: number, option) => {
-                setMode((option?.value as AppMode) ?? "Chat");
-                setShowModeSelect(false);
-              }}
-              focused
-              selectedBackgroundColor={theme.border}
-              selectedTextColor={theme.text}
-            />
-          </box>
-        </box>
-      </box>
-    );
-  }
-
   if (runningCommand) {
     return (
       <box
@@ -315,7 +272,7 @@ export function InputRow({ chat }: InputRowProps) {
             const value = typeof valueOrEvent === "string" ? valueOrEvent : undefined;
             sendMessage(value);
           }}
-          placeholder={!apiKey ? "Set API key: type / then choose /setup" : mode === "Terminal Agent" ? "Ask anything here (type / for commands)" : "Message… (type / for commands)"}
+          placeholder={!apiKey ? "Set API key: type / then choose /setup" : "Ask anything here (type / for commands)"}
           focused={!showCommandPalette}
           flexGrow={1}
           backgroundColor={theme.bg}

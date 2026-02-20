@@ -1,15 +1,14 @@
+import { getAppVersion } from "../constants";
 import { theme } from "../theme";
-import type { AppMode } from "../types";
 
 interface HeaderProps {
-  mode: AppMode;
   thinkingEnabled: boolean;
   webSearchEnabled: boolean;
   tokenCounterText: string;
   modelKey: string;
 }
 
-export function Header({ mode, thinkingEnabled, webSearchEnabled, tokenCounterText, modelKey }: HeaderProps) {
+export function Header({ thinkingEnabled, webSearchEnabled, tokenCounterText, modelKey }: HeaderProps) {
   return (
     <box
       flexDirection="row"
@@ -24,9 +23,7 @@ export function Header({ mode, thinkingEnabled, webSearchEnabled, tokenCounterTe
       backgroundColor={theme.bgElevated}
     >
       <text>
-        <span fg={theme.accent}>oasys</span>
-        <span fg={theme.muted}> · </span>
-        <span fg={theme.text}>Mode: {mode}</span>
+        <span fg={theme.accent}>oasys v{getAppVersion()}</span>
         {thinkingEnabled && (
           <>
             <span fg={theme.muted}> · </span>

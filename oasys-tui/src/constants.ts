@@ -22,7 +22,6 @@ export function getAppVersion(): string {
 
 export const SLASH_COMMANDS: { name: string; description: string; value: string }[] = [
   { name: "/new", description: "Start a new empty chat room", value: "new" },
-  { name: "/mode", description: "Switch Chat or Terminal Agent mode", value: "mode" },
   { name: "/setup", description: "Set Google AI API key", value: "setup" },
   { name: "/model", description: "Select model", value: "model" },
   { name: "/history", description: "Open chat history", value: "history" },
