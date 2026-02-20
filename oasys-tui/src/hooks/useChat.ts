@@ -11,7 +11,8 @@ import {
 import { loadConfig, saveConfig, getOrCreateUserId } from "../config";
 import { getSystemInfo, getExtendedSystemInfo, formatSystemInfoShort, formatSystemInfoJSON, type SystemInfo } from "../systemInfo";
 import { runCommand } from "../utils/command";
-import { DEFAULT_MODEL_KEY, LOADING_SPINNER_FRAMES, LOADING_SPINNER_INTERVAL_MS } from "../constants";
+import { checkForUpdate, runInstallScript, runUpdateViaDetachedShell } from "../utils/update";
+import { DEFAULT_MODEL_KEY, getAppVersion, LOADING_SPINNER_FRAMES, LOADING_SPINNER_INTERVAL_MS } from "../constants";
 import type { AppMode, Message, CommandBlock } from "../types";
 
 export interface UseChatReturn {
@@ -239,6 +240,51 @@ export function useChat(): UseChatReturn {
     };
   };
 
+  const runUpdateCheck = () => {
+    (async () => {
+      const current = getAppVersion();
+      const check = await checkForUpdate(current);
+      let text: string;
+      if (!check.ok) {
+        text = `Could not check for updates: ${check.error}`;
+      } else if (!check.updateAvailable) {
+        text = `You're on the latest version (${check.latest}).`;
+      } else {
+        // Try detached updater (kill this process, install in place, restart); fallback to install script
+        const detached = runUpdateViaDetachedShell();
+        if (detached.ok) {
+          text = `Update available: ${check.latest}. Starting update — this window will close and oasys will restart.`;
+          setMessages((prev) => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            if (last?.role === "assistant") next[next.length - 1] = { ...last, content: text };
+            return next;
+          });
+          return;
+        }
+        text = `Update available: ${check.latest}. Installing...`;
+        setMessages((prev) => {
+          const next = [...prev];
+          const last = next[next.length - 1];
+          if (last?.role === "assistant") next[next.length - 1] = { ...last, content: text };
+          return next;
+        });
+        const install = await runInstallScript();
+        if (install.ok) {
+          text += `\n\nInstalled successfully. Restart oasys to use the new version.`;
+        } else {
+          text += `\n\nInstall failed: ${install.error}`;
+        }
+      }
+      setMessages((prev) => {
+        const next = [...prev];
+        const last = next[next.length - 1];
+        if (last?.role === "assistant") next[next.length - 1] = { ...last, content: text };
+        return next;
+      });
+    })();
+  };
+
   const sendMessage = async (submitValue?: string) => {
     let raw = (submitValue ?? inputValue).trim();
     if (raw === "/new" || raw.startsWith("/new ")) {
@@ -287,6 +333,25 @@ export function useChat(): UseChatReturn {
     if (raw === "/websearch" || raw.startsWith("/websearch ")) {
       setWebSearchEnabled((prev) => !prev);
       setInputValue("");
+      return;
+    }
+    if (raw === "/version" || raw.startsWith("/version ")) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", content: "/version" },
+        { role: "assistant", content: `oasys-tui version ${getAppVersion()}` },
+      ]);
+      setInputValue("");
+      return;
+    }
+    if (raw === "/update" || raw.startsWith("/update ")) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", content: "/update" },
+        { role: "assistant", content: "Checking for updates..." },
+      ]);
+      setInputValue("");
+      runUpdateCheck();
       return;
     }
     if (!apiKey) return;
@@ -447,6 +512,21 @@ export function useChat(): UseChatReturn {
     if (value === "history") openHistoryAndLoad();
     if (value === "thinking") setThinkingEnabled((prev) => !prev);
     if (value === "websearch") setWebSearchEnabled((prev) => !prev);
+    if (value === "version") {
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", content: "/version" },
+        { role: "assistant", content: `oasys-tui version ${getAppVersion()}` },
+      ]);
+    }
+    if (value === "update") {
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", content: "/update" },
+        { role: "assistant", content: "Checking for updates..." },
+      ]);
+      runUpdateCheck();
+    }
   };
 
   const toggleBlockCollapsed = (blockId: string) => {

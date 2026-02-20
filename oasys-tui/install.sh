@@ -66,8 +66,19 @@ if [[ ${1:-} =~ ^v[0-9] ]]; then
   info "Installing version $1"
 fi
 
-# Install directory
-install_dir="${OASYS_INSTALL_DIR:-$HOME/.local/bin}"
+# Install directory: prefer explicit dir, else existing oasys location (update in place), else default
+tildify_early() { if [[ -n "${HOME:-}" && $1 = "$HOME"/* ]]; then echo "~/${1#${HOME}/}"; else echo "$1"; fi; }
+if [[ -n "${OASYS_INSTALL_DIR:-}" ]]; then
+  install_dir="$OASYS_INSTALL_DIR"
+else
+  existing_oasys=$(command -v oasys 2>/dev/null || true)
+  if [[ -n "$existing_oasys" ]]; then
+    install_dir=$(dirname "$existing_oasys")
+    info "Detected existing oasys at $(tildify_early "$existing_oasys"); will update in place."
+  else
+    install_dir="${HOME:-~}/.local/bin"
+  fi
+fi
 bin_dir="$install_dir"
 exe="$bin_dir/oasys"
 [[ $target = windows-x64 ]] && exe="$bin_dir/oasys.exe"
