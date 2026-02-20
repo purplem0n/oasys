@@ -246,7 +246,40 @@ function extractCommandFromAssistantText(text: string): string | null {
 		const cmd = backtickLine[1].trim();
 		if (cmd.length > 0 && cmd.length < 256) return cmd;
 	}
+	// Model emitted tool call as literal JSON in stream (e.g. {"toolName": "run_command", "arguments": {"command": "lsblk"}})
+	const jsonToolCall = /"toolName"\s*:\s*"run_command"[\s\S]*?"(?:arguments|input)"\s*:\s*\{[\s\S]*?"command"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(t);
+	if (jsonToolCall?.[1]) {
+		const cmd = jsonToolCall[1].replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\").trim();
+		if (cmd.length > 0 && cmd.length < 2048) return cmd;
+	}
 	return null;
+}
+
+/** Remove a run_command JSON block from assistant text so we don't store or show it to the user. */
+function stripRunCommandJsonFromText(text: string): string {
+	if (!text || typeof text !== "string") return text;
+	const t = text.trim();
+	const runCommandMarker = /"toolName"\s*:\s*"run_command"/.exec(t);
+	if (!runCommandMarker) return text;
+	const idx = runCommandMarker.index;
+	const braceStart = t.lastIndexOf("{", idx);
+	if (braceStart === -1) return text;
+	let depth = 0;
+	let endIndex = -1;
+	for (let i = braceStart; i < t.length; i++) {
+		if (t[i] === "{") depth++;
+		else if (t[i] === "}") {
+			depth--;
+			if (depth === 0) {
+				endIndex = i;
+				break;
+			}
+		}
+	}
+	if (endIndex === -1) return text;
+	const before = t.slice(0, braceStart).trimEnd();
+	const after = t.slice(endIndex + 1).trimStart();
+	return (before + (after ? "\n" + after : "")).trim();
 }
 
 /** Format run_command result for the model as plain text to avoid JSON/structure echoing. */
@@ -630,7 +663,7 @@ export async function handleGeminiStream(c: AppContext, body: z.infer<typeof AIS
 				totalUsage,
 			]);
 
-			// If model wrote the command in text (e.g. <command>...</command>) instead of using the tool, extract and emit a synthetic tool call.
+			// If model wrote the command in text (e.g. <command>...</command> or JSON tool block) instead of using the tool, extract and emit a synthetic tool call.
 			// Do this whenever we have no tool calls and some assistant text (not only when classifier said expectToolCall), so e.g. "measure my internet speed" -> <command>which speedtest-cli</command> still runs.
 			let effectiveToolCalls = Array.isArray(toolCallsResult) ? toolCallsResult : [];
 			if (effectiveToolCalls.length === 0 && mode === "terminal_agent" && assistantResponse) {
@@ -640,6 +673,8 @@ export async function handleGeminiStream(c: AppContext, body: z.infer<typeof AIS
 						{ type: "tool-call" as const, toolCallId: "fallback-0", toolName: "run_command", input: { command: extracted } },
 					];
 					apiLog.info("Terminal Agent: extracted command from assistant text (synthetic tool call):", extracted.slice(0, 60));
+					// Strip run_command JSON (or similar) from stored content so the user doesn't see raw tool-call JSON.
+					assistantResponse = stripRunCommandJsonFromText(assistantResponse);
 				}
 			}
 
